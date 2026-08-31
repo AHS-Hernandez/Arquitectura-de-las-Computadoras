@@ -1,0 +1,11 @@
+#include <stdio.h>
+#define TAMANIO 5
+int main(){
+        int array[TAMANIO] = {10, 20, 30, 40, 1};
+        int suma = 0;
+        for (int i = 0; i < TAMANIO; i++){
+                suma += array[i];
+        }
+        printf("SUma total %d\n", suma);
+        return 0;
+}
