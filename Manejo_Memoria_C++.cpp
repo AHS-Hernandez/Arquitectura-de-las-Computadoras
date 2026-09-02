@@ -1,7 +1,6 @@
 #include <iostream>
 #include <fstream>
 #include <cstring>   // memcpy, memset
-#include <vector>
 
 int main() {
     const int TOTAL = 1000;
