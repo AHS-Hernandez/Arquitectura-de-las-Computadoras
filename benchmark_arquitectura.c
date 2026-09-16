@@ -1,4 +1,3 @@
-cat << 'EOF' > benchmark_arquitectura.c
 #define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
 #include <stdlib.h>
@@ -129,4 +128,3 @@ int main(void) {
     free(A); free(B); free(C1); free(C2); free(C3); free(C4);
     return 0;
 }
-EOF
