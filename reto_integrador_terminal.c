@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 
 #define RAM_SIZE 256
 #define COLA_BASE_DIR  0x70
@@ -81,7 +83,13 @@ bool cola_teclado_desencolar(uint8_t *salida_ascii) {
 
 /* --- CONTROLADOR DE PANTALLA VRAM --- */
 void monitor_actualizar_pantalla(void) {
-    printf("\n+--- MONITOR VRAM (4x4) ---+\n");
+    printf("\033[H\033[J"); /* Limpiar consola */
+    printf("==============================================\n");
+    printf("   SISTEMA DE E/S: TECLADO -> COLA -> VRAM    \n");
+    printf("==============================================\n");
+    printf("Escribe normalmente con tu teclado fisico.\n");
+    printf("Usa [Backspace] para borrar y [ESC] para salir.\n\n");
+    printf("+--- PANTALLA VRAM (4x4) ---+\n");
     for (int f = 0; f < 4; f++) {
         printf("| ");
         for (int c = 0; c < 4; c++) {
@@ -95,8 +103,11 @@ void monitor_actualizar_pantalla(void) {
         }
         printf("|\n");
     }
-    printf("+--------------------------+\n");
-    printf("Cursor VRAM: 0x%02X | Cola Count: %u\n", g_pc.cursor_vram, g_pc.ram[DIR_KB_COUNT]);
+    printf("+---------------------------+\n");
+    printf("Registros de Hardware:\n");
+    printf(" -> Cursor VRAM       : 0x%02X\n", g_pc.cursor_vram);
+    printf(" -> Encolados en RAM  : %u / %d\n", g_pc.ram[DIR_KB_COUNT], COLA_CAPACIDAD);
+    printf(" -> Ultima Instruccion: IN (Puerto 0x01 y 0x02)\n");
 }
 
 void vram_scroll_arriba(void) {
@@ -111,15 +122,14 @@ void vram_scroll_arriba(void) {
     g_pc.cursor_vram = VRAM_INICIO + 12;
 }
 
-/* --- LOGICA INTEGRADORA CON BACKSPACE --- */
 bool terminal_procesar_siguiente_tecla(void) {
     uint8_t tecla;
     if (!cola_teclado_desencolar(&tecla)) return false;
     
-    if (tecla == 0x08 || tecla == 0x7F) { /* BACKSPACE */
+    if (tecla == 0x08 || tecla == 0x7F) { /* Tecla Backspace */
         if (g_pc.cursor_vram > VRAM_INICIO) {
             g_pc.cursor_vram--;
-            g_pc.ram[g_pc.cursor_vram] = 0x20; /* Borra caracter */
+            g_pc.ram[g_pc.cursor_vram] = 0x20;
         }
     } else if (tecla >= 32 && tecla <= 126) {
         if (g_pc.cursor_vram >= VRAM_FIN) {
@@ -134,45 +144,38 @@ bool terminal_procesar_siguiente_tecla(void) {
     return true;
 }
 
-/* Simulador de hardware de teclado */
-void hardware_presionar_tecla(uint8_t ascii) {
-    g_teclado.reg_data = ascii;
-    g_teclado.reg_status = 0x01;
-
-    uint8_t status = cpu_instruccion_in(0x01);
-    if (status & 0x01) {
-        uint8_t dato = cpu_instruccion_in(0x02);
-        cola_teclado_encolar(dato);
-    }
-}
-
 int main(void) {
-    printf("=== RETO INTEGRADOR: TERMINAL CON FIFO, VRAM Y BACKSPACE ===\n");
+    struct termios viejo_t, nuevo_t;
+    tcgetattr(STDIN_FILENO, &viejo_t);
+    nuevo_t = viejo_t;
+    nuevo_t.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &nuevo_t);
+
     memset(g_pc.ram, 0, RAM_SIZE);
     for (int i = VRAM_INICIO; i <= VRAM_FIN; i++) g_pc.ram[i] = 0x20;
     g_pc.cursor_vram = VRAM_INICIO;
 
     monitor_actualizar_pantalla();
 
-    /* 1. Escribir palabra "HOLA" */
-    printf("\n>>> Simulando tipeo de 'H', 'O', 'L', 'A'...\n");
-    hardware_presionar_tecla('H'); terminal_procesar_siguiente_tecla();
-    hardware_presionar_tecla('O'); terminal_procesar_siguiente_tecla();
-    hardware_presionar_tecla('L'); terminal_procesar_siguiente_tecla();
-    hardware_presionar_tecla('A'); terminal_procesar_siguiente_tecla();
+    char c;
+    while (read(STDIN_FILENO, &c, 1) == 1) {
+        if (c == 27) break; /* Salir con tecla ESC */
 
-    /* 2. Error y correccion con BACKSPACE */
-    printf("\n>>> Simulando error: tipeo de 'X' y correccion con BACKSPACE (0x08)...\n");
-    hardware_presionar_tecla('X'); terminal_procesar_siguiente_tecla();
-    hardware_presionar_tecla(0x08); terminal_procesar_siguiente_tecla();
+        /* Escribir en hardware */
+        g_teclado.reg_data = (uint8_t)c;
+        g_teclado.reg_status = 0x01;
 
-    /* 3. Llenar segunda fila */
-    printf("\n>>> Escribiendo '1', '2', '3', '4' en segunda fila...\n");
-    hardware_presionar_tecla('1'); terminal_procesar_siguiente_tecla();
-    hardware_presionar_tecla('2'); terminal_procesar_siguiente_tecla();
-    hardware_presionar_tecla('3'); terminal_procesar_siguiente_tecla();
-    hardware_presionar_tecla('4'); terminal_procesar_siguiente_tecla();
+        /* Lectura mediante puerto de hardware con handshake */
+        uint8_t st = cpu_instruccion_in(0x01);
+        if (st & 0x01) {
+            uint8_t dato = cpu_instruccion_in(0x02);
+            cola_teclado_encolar(dato);
+            terminal_procesar_siguiente_tecla();
+        }
+    }
 
+    tcsetattr(STDIN_FILENO, TCSANOW, &viejo_t);
+    printf("\n[OK] Terminal cerrada y modo de consola restaurado.\n");
     return 0;
 }
-EOF
+gcc -std=c99 -Wall -Wextra -pedantic reto_integrador_terminal.c -o terminal
